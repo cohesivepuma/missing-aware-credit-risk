@@ -8,7 +8,12 @@ import pytest
 import torch
 
 from src.data.loader import load_dataset
-from src.data.missing_generator import generate_missingness
+from src.data.missing_generator import (
+    MissingnessResult,
+    apply_missingness,
+    fit_missingness_plan,
+    generate_missingness,
+)
 from src.data.preprocess import split_dataset
 from src.models.logistic import LogisticRegressionModel
 from src.utils.seed import set_seed
@@ -88,14 +93,204 @@ def test_preprocessing_fits_only_training_rows_and_keeps_empty_columns() -> None
 
 
 @pytest.mark.parametrize("mechanism", ["mcar", "mar", "mnar"])
-def test_missing_generator_is_explicitly_pending(mechanism: str) -> None:
+@pytest.mark.parametrize("rate", [0.1, 0.3, 0.5])
+def test_missing_generator_exactly_controls_rate_without_mutating_input(
+    mechanism: str, rate: float
+) -> None:
     data = load_dataset(seed=42)
-    with pytest.raises(NotImplementedError, match="phase 2"):
-        generate_missingness(data, mechanism=mechanism, rate=0.3)
-    assert np.all(data["mask"] == 1)
+    original_x = data["x"].copy()
+    original_mask = data["mask"].copy()
+    original_y = data["y"].copy()
+    options = {"driver_features": [0]} if mechanism == "mar" else {}
+
+    result = generate_missingness(
+        data,
+        mechanism=mechanism,
+        rate=rate,
+        seed=42,
+        return_report=True,
+        **options,
+    )
+
+    assert isinstance(result, MissingnessResult)
+    assert result.report.mechanism == mechanism
+    assert result.report.requested_rate == rate
+    assert result.report.injected_rate == pytest.approx(rate)
+    assert result.report.injected_cells == round(rate * result.report.candidate_cells)
+    np.testing.assert_array_equal(data["x"], original_x)
+    np.testing.assert_array_equal(data["mask"], original_mask)
+    np.testing.assert_array_equal(data["y"], original_y)
+    np.testing.assert_array_equal(result.data["y"], original_y)
+    np.testing.assert_array_equal(
+        result.data["mask"], (~np.isnan(result.data["x"])).astype(np.uint8)
+    )
 
 
-@pytest.mark.parametrize("rate", [-0.1, 1.1, float("nan")])
+def test_existing_missing_cells_are_preserved() -> None:
+    x = np.arange(60, dtype=np.float64).reshape(20, 3)
+    x[0, 1] = np.nan
+    x[5, 2] = np.nan
+    data = {
+        "x": x,
+        "mask": (~np.isnan(x)).astype(np.uint8),
+        "y": np.arange(20) % 2,
+    }
+
+    result = generate_missingness(data, mechanism="mcar", rate=0.5, seed=7)
+
+    assert np.isnan(result["x"][0, 1]) and result["mask"][0, 1] == 0
+    assert np.isnan(result["x"][5, 2]) and result["mask"][5, 2] == 0
+    np.testing.assert_array_equal(result["mask"], (~np.isnan(result["x"])).astype(np.uint8))
+
+
+def test_frozen_plan_is_reusable_and_reproducible_across_splits() -> None:
+    rows = 100
+    train_x = np.column_stack((np.arange(rows), np.linspace(0, 1, rows)))
+    test_x = np.column_stack((np.arange(rows) + 1000, np.linspace(2, 3, rows)))
+    y = np.arange(rows) % 2
+    train = {"x": train_x, "mask": np.ones_like(train_x, dtype=np.uint8), "y": y}
+    test = {"x": test_x, "mask": np.ones_like(test_x, dtype=np.uint8), "y": y}
+
+    plan = fit_missingness_plan(
+        train,
+        mechanism="mar",
+        rate=0.3,
+        seed=13,
+        eligible_features=[0, 1],
+        driver_features=[0],
+    )
+    expected_thresholds = tuple(np.quantile(train_x[:, 0], [0.2, 0.4, 0.6, 0.8]))
+    assert plan.driver_thresholds[0] == pytest.approx(expected_thresholds)
+
+    first = apply_missingness(test, plan)
+    second = apply_missingness(test, plan)
+    np.testing.assert_array_equal(first["x"], second["x"])
+    np.testing.assert_array_equal(first["mask"], second["mask"])
+    assert np.all(first["mask"][:, 0] == 1)
+
+
+def test_mar_driver_stays_observed_and_high_driver_has_more_missingness() -> None:
+    rows = 500
+    x = np.column_stack(
+        (np.arange(rows, dtype=np.float64), np.ones(rows), np.ones(rows))
+    )
+    data = {"x": x, "mask": np.ones_like(x, dtype=np.uint8), "y": np.arange(rows) % 2}
+
+    result = generate_missingness(
+        data,
+        mechanism="mar",
+        rate=0.5,
+        seed=42,
+        eligible_features=[0, 1, 2],
+        driver_features=[0],
+    )
+
+    assert np.all(result["mask"][:, 0] == 1)
+    low_missing = np.sum(result["mask"][: rows // 2, 1:] == 0)
+    high_missing = np.sum(result["mask"][rows // 2 :, 1:] == 0)
+    assert high_missing > low_missing
+
+
+@pytest.mark.parametrize(
+    ("direction", "comparison"),
+    [("higher", "higher"), ("lower", "lower")],
+)
+def test_mnar_depends_on_the_injected_feature_value(
+    direction: str, comparison: str
+) -> None:
+    rows = 1000
+    x = np.column_stack((np.arange(rows, dtype=np.float64), np.ones(rows)))
+    data = {"x": x, "mask": np.ones_like(x, dtype=np.uint8), "y": np.arange(rows) % 2}
+
+    result = generate_missingness(
+        data,
+        mechanism="mnar",
+        rate=0.5,
+        seed=42,
+        eligible_features=[0],
+        direction=direction,
+    )
+
+    missing_mean = x[result["mask"][:, 0] == 0, 0].mean()
+    observed_mean = x[result["mask"][:, 0] == 1, 0].mean()
+    if comparison == "higher":
+        assert missing_mean > observed_mean
+    else:
+        assert missing_mean < observed_mean
+
+
+@pytest.mark.parametrize("mechanism", ["mcar", "mar", "mnar"])
+def test_missingness_does_not_depend_on_labels(mechanism: str) -> None:
+    x = np.column_stack((np.arange(200, dtype=np.float64), np.arange(200) % 7))
+    mask = np.ones_like(x, dtype=np.uint8)
+    first = {"x": x.copy(), "mask": mask.copy(), "y": np.arange(200) % 2}
+    second = {"x": x.copy(), "mask": mask.copy(), "y": 1 - first["y"]}
+    options = {"driver_features": [0]} if mechanism == "mar" else {}
+
+    first_result = generate_missingness(
+        first, mechanism=mechanism, rate=0.3, seed=42, **options
+    )
+    second_result = generate_missingness(
+        second, mechanism=mechanism, rate=0.3, seed=42, **options
+    )
+
+    np.testing.assert_array_equal(first_result["mask"], second_result["mask"])
+    np.testing.assert_array_equal(first_result["x"], second_result["x"])
+
+
+@pytest.mark.parametrize("mechanism", ["mcar", "mar", "mnar"])
+def test_rate_boundaries_are_exact(mechanism: str) -> None:
+    data = load_dataset(seed=42, n_samples=50, n_features=4, n_informative=2)
+    options = {"driver_features": [0]} if mechanism == "mar" else {}
+
+    unchanged = generate_missingness(
+        data, mechanism=mechanism, rate=0.0, seed=42, **options
+    )
+    fully_missing = generate_missingness(
+        data, mechanism=mechanism, rate=1.0, seed=42, **options
+    )
+
+    np.testing.assert_array_equal(unchanged["mask"], np.ones_like(data["mask"]))
+    if mechanism == "mar":
+        assert np.all(fully_missing["mask"][:, 0] == 1)
+        assert np.all(fully_missing["mask"][:, 1:] == 0)
+    else:
+        assert np.all(fully_missing["mask"] == 0)
+
+
+@pytest.mark.parametrize("rate", [-0.1, 1.1, float("nan"), True])
 def test_missing_generator_rejects_invalid_rates(rate: float) -> None:
     with pytest.raises(ValueError, match="rate"):
         generate_missingness(load_dataset(), mechanism="mcar", rate=rate)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"mechanism": "invalid", "rate": 0.3}, "mechanism"),
+        ({"mechanism": "mcar", "rate": 0.3, "direction": "sideways"}, "direction"),
+        ({"mechanism": "mcar", "rate": 0.3, "strength": 0}, "strength"),
+        (
+            {"mechanism": "mcar", "rate": 0.3, "driver_features": [0]},
+            "driver_features",
+        ),
+        (
+            {
+                "mechanism": "mar",
+                "rate": 0.3,
+                "eligible_features": [0, 1],
+                "driver_features": [0, 1],
+            },
+            "injectable",
+        ),
+        (
+            {"mechanism": "mnar", "rate": 0.3, "eligible_features": [0, 0]},
+            "duplicate",
+        ),
+    ],
+)
+def test_missing_generator_rejects_invalid_configuration(
+    kwargs: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        generate_missingness(load_dataset(), **kwargs)
