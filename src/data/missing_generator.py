@@ -119,6 +119,17 @@ def _validate_dataset(data: Dataset) -> None:
         raise ValueError("mask must align exactly with original NaN values in x.")
 
 
+def _validate_mar_drivers(data: Dataset, drivers: tuple[int, ...]) -> None:
+    """Require fully observed, finite MAR drivers in each input split."""
+    if not np.all(data["mask"][:, drivers] == 1) or not np.isfinite(
+        data["x"][:, drivers]
+    ).all():
+        raise ValueError(
+            "MAR driver features must be fully observed and finite in every split; "
+            "choose fully observed driver columns."
+        )
+
+
 def _thresholds(values: np.ndarray) -> tuple[float, ...]:
     finite = np.asarray(values, dtype=np.float64)
     finite = finite[np.isfinite(finite)]
@@ -163,9 +174,10 @@ def fit_missingness_plan(
     ``rate`` is the share of currently observed eligible cells converted to
     missing. The selected count is rounded to the nearest integer. For MAR,
     driver columns are removed from the injectable set so they always remain
-    observable. MNAR should be restricted to numeric or explicitly ordered
-    fields through ``eligible_features``; arbitrary category codes are not a
-    meaningful numerical ordering.
+    observable. Driver values must already be fully observed and finite in
+    every split; invalid drivers raise ``ValueError``. MNAR should be restricted
+    to numeric or explicitly ordered fields through ``eligible_features``;
+    arbitrary category codes are not a meaningful numerical ordering.
     """
     if mechanism not in {"mcar", "mar", "mnar"}:
         raise ValueError("mechanism must be 'mcar', 'mar' or 'mnar'.")
@@ -202,6 +214,7 @@ def fit_missingness_plan(
     driver_thresholds: tuple[tuple[float, ...], ...] = ()
     feature_thresholds: tuple[tuple[float, ...], ...] = ()
     if mechanism == "mar":
+        _validate_mar_drivers(data, drivers)
         driver_thresholds = tuple(
             _thresholds(data["x"][:, feature]) for feature in drivers
         )
@@ -283,10 +296,12 @@ def apply_missingness(
     *,
     return_report: bool = False,
 ) -> Dataset | MissingnessResult:
-    """Apply a frozen plan without mutating ``data``."""
+    """Apply a frozen plan; reject missing or nonfinite MAR drivers in this split."""
     _validate_dataset(data)
     if data["x"].shape[1] != plan.n_features:
         raise ValueError("Missingness plan and dataset feature counts do not match.")
+    if plan.mechanism == "mar":
+        _validate_mar_drivers(data, plan.driver_features)
 
     result: Dataset = {
         "x": data["x"].copy(),

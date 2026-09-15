@@ -126,7 +126,8 @@ def test_missing_generator_exactly_controls_rate_without_mutating_input(
     )
 
 
-def test_existing_missing_cells_are_preserved() -> None:
+@pytest.mark.parametrize("mechanism", ["mcar", "mar", "mnar"])
+def test_existing_missing_cells_are_preserved(mechanism: str) -> None:
     x = np.arange(60, dtype=np.float64).reshape(20, 3)
     x[0, 1] = np.nan
     x[5, 2] = np.nan
@@ -136,11 +137,55 @@ def test_existing_missing_cells_are_preserved() -> None:
         "y": np.arange(20) % 2,
     }
 
-    result = generate_missingness(data, mechanism="mcar", rate=0.5, seed=7)
+    options = {"driver_features": [0]} if mechanism == "mar" else {}
+    result = generate_missingness(
+        data, mechanism=mechanism, rate=0.5, seed=7, **options
+    )
 
     assert np.isnan(result["x"][0, 1]) and result["mask"][0, 1] == 0
     assert np.isnan(result["x"][5, 2]) and result["mask"][5, 2] == 0
     np.testing.assert_array_equal(result["mask"], (~np.isnan(result["x"])).astype(np.uint8))
+
+
+@pytest.mark.parametrize(
+    ("stage", "rate"),
+    [("fit", 0.3), ("apply", 0.0), ("apply", 0.3), ("apply", 1.0)],
+)
+@pytest.mark.parametrize(
+    ("invalid_value", "all_rows"),
+    [(np.nan, False), (np.nan, True), (np.inf, False), (-np.inf, False)],
+    ids=["partial-missing", "all-missing", "positive-infinity", "negative-infinity"],
+)
+def test_mar_rejects_missing_or_nonfinite_drivers(
+    stage: str, rate: float, invalid_value: float, all_rows: bool
+) -> None:
+    x = np.arange(60, dtype=np.float64).reshape(20, 3)
+    clean = {"x": x, "mask": np.ones_like(x, dtype=np.uint8), "y": np.arange(20) % 2}
+    options = {"mechanism": "mar", "rate": rate, "driver_features": [0, 1]}
+    plan = fit_missingness_plan(clean, **options) if stage == "apply" else None
+
+    invalid_x = x.copy()
+    # Corrupt the second driver to ensure every configured driver is checked.
+    if all_rows:
+        invalid_x[:, 1] = invalid_value
+    else:
+        invalid_x[0, 1] = invalid_value
+    invalid = {
+        "x": invalid_x,
+        "mask": (~np.isnan(invalid_x)).astype(np.uint8),
+        "y": clean["y"].copy(),
+    }
+    original = {key: value.copy() for key, value in invalid.items()}
+
+    with pytest.raises(ValueError, match="MAR driver.*fully observed.*finite"):
+        if stage == "fit":
+            fit_missingness_plan(invalid, **options)
+        else:
+            assert plan is not None
+            apply_missingness(invalid, plan)
+
+    for key in original:
+        np.testing.assert_array_equal(invalid[key], original[key])
 
 
 def test_frozen_plan_is_reusable_and_reproducible_across_splits() -> None:
