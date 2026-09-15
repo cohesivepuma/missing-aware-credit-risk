@@ -1,4 +1,4 @@
-name: Tests and baseline
+name: Tests and reproducible experiments
 
 on:
   push:
@@ -29,3 +29,8 @@ jobs:
           python experiments/run_baseline.py --output results/baseline-first.json
           python experiments/run_baseline.py --output results/baseline-second.json
           cmp results/baseline-first.json results/baseline-second.json
+      - name: Run calibration twice and compare reports
+        run: |
+          python experiments/run_calibration.py --output results/calibration-first.json
+          python experiments/run_calibration.py --output results/calibration-second.json
+          cmp results/calibration-first.json results/calibration-second.json
