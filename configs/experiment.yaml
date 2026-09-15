@@ -1,0 +1,12 @@
+# Research roadmap only. The advanced runners are not implemented in phase 1.
+seeds: [42, 43, 44]
+missingness:
+  mechanisms: [mcar, mar, mnar]
+  rates: [0.1, 0.3, 0.5]
+  mask_convention: "1 = observed, 0 = missing"
+models: [logistic, random_forest, lightgbm, mlp, mask_aware_mlp]
+calibration:
+  methods: [none, platt, isotonic, temperature]
+  fit_on: validation
+metrics: [auc, f1, brier, ece]
+ablations: [without_mask, without_calibration]

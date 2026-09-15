@@ -1,0 +1,32 @@
+# Local data, weights and generated experiment artifacts
+data/raw/
+data/processed/
+checkpoints/
+results/*
+!results/README.md
+*.pt
+*.pth
+*.pkl
+*.joblib
+*.npy
+*.npz
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Editors, OS and local secrets
+.idea/
+.vscode/
+.DS_Store
+.env
+.env.*
+!.env.example
