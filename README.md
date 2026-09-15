@@ -32,7 +32,10 @@ Toy 指标只用于检查流程，不能作为信用风险研究结论。
 | MCAR / MAR / MNAR | 已实现，支持固定 seed、精确缺失率、训练集拟合计划和可复用 mask |
 | LightGBM、MLP、Mask-aware MLP | 接口与 TODO，尚未训练实现 |
 | Random Forest | 后续计划，当前未建立实现 |
-| 概率校准、缺失实验、消融实验 | 接口与 TODO，尚未实现 |
+| Platt Scaling / Isotonic Regression 概率校准 | 已实现，只在 validation_calibration 拟合 |
+| 校准前后配对对比与可靠性图 | 已实现，各变体使用同一批测试样本 |
+| 缺失实验、消融实验 | 接口与 TODO，尚未实现 |
+| Temperature Scaling | 仅定义 logits adapter，温度拟合尚未实现 |
 | Streamlit Demo | 状态展示入口，尚无预测功能 |
 
 ## 环境安装
@@ -95,6 +98,7 @@ missing-aware-credit-risk/
 ├── configs/
 │   ├── baseline.yaml         # 当前可运行配置
 │   ├── german_credit.yaml    # 真实信用数据与共享划分配置
+│   ├── calibration.yaml      # 冻结基础模型后的校准对比配置
 │   └── experiment.yaml       # 研究矩阵与缺失机制参数，统一 runner 仍待集成
 ├── data/
 │   └── README.md             # 公开数据获取与本地数据约定
@@ -103,16 +107,18 @@ missing-aware-credit-risk/
 │   └── inspect_german_credit.py # 五行轻量预览
 ├── docs/
 │   ├── data_protocol.md      # 字段协议及课程报告数据/预处理正文
+│   ├── calibration_protocol.md # 校准协议、结果产物及课程报告校准正文
 │   └── missingness_protocol.md # MCAR/MAR/MNAR 定义、复现和报告协议
 ├── src/
 │   ├── __init__.py
 │   ├── data/                 # loader.py / preprocess.py / german_credit.py / prepare.py / missing_generator.py
 │   ├── models/               # base.py / logistic.py / lightgbm_model.py / mlp.py / mask_aware_mlp.py
-│   ├── calibration/          # calibrators.py
+│   ├── calibration/          # calibrators.py / reliability.py
 │   ├── metrics/              # metrics.py
 │   └── utils/                # seed.py
 ├── experiments/
 │   ├── run_baseline.py       # 可运行的训练与评价流程
+│   ├── run_calibration.py    # 校准前后配对对比与可靠性图
 │   ├── run_missingness.py    # TODO
 │   └── run_ablation.py       # TODO
 ├── results/
@@ -121,6 +127,9 @@ missing-aware-credit-risk/
 │   └── streamlit_app.py      # 可选 Demo 入口
 └── tests/
     ├── test_data.py          # 标签、来源校验、共享划分和类别拟合边界
+    ├── test_calibration.py   # 校准边界、输入校验与拟合/预测分离
+    ├── test_calibration_runner.py # 校准数据隔离、模型冻结与报告保护
+    ├── test_reliability.py   # 分箱协议一致性与可靠性图输出
     ├── test_missing_generator.py
     └── test_metrics.py
 ```
@@ -154,19 +163,31 @@ python experiments/run_baseline.py --config configs/german_credit.yaml
 
 首次准备从官方来源下载并校验，后续复用本地缓存。处理后的 CSV、元数据、质量报告与 splits_seed42.json 保存在被 Git 忽略的 data/processed/german_credit/。同一索引文件被所有模型复用，并核对数据指纹和划分配置。German Credit 验证集拆分为互斥的 validation_tune 与 validation_calibration，父视图 validation 不单独计入样本总数。
 
+## 运行概率校准对比
+
+先训练并冻结基础模型，再用独立的 validation_calibration 拟合校准，最后在同一批测试样本上比较校准前后：
+
+```bash
+python experiments/run_calibration.py
+python experiments/run_calibration.py --config configs/german_credit.yaml --output results/german_credit_calibration.json
+python experiments/run_calibration.py --seeds 42 43 44 --output results/calibration_multiseed.json
+```
+
+默认配置使用合成数据，无需下载任何数据。报告写入 `results/calibration.json`，可靠性图写入 `results/`。对比是配对的：`uncalibrated`、`platt`、`isotonic` 使用完全相同的测试行、相同阈值与相同分箱数；测试集不参与选择校准方法、阈值或分箱数。校准可能改善也可能退化，报告如实记录 `delta_vs_uncalibrated`，不把指标必然下降作为验收条件。多种子模式要求 `split.manifest_path` 为包含 `{seed}` 的模板。详见[校准协议](docs/calibration_protocol.md)。
+
 ## 测试与可复现性
 
 ```bash
 python -m pytest
 ```
 
-测试覆盖手算指标、概率边界、mask 约定、三个随机数生成器、固定种子划分与预测、划分互斥、缺失值填充和训练集预处理边界。缺失机制测试进一步覆盖精确缺失率、输入不变、已有缺失保留、NaN/mask 对齐、训练集参数复用、标签独立、MAR 驱动可观测和 MNAR 特征相关。
+测试覆盖手算指标、概率边界、mask 约定、三个随机数生成器、固定种子划分与预测、划分互斥、缺失值填充和训练集预处理边界。缺失机制测试进一步覆盖精确缺失率、输入不变、已有缺失保留、NaN/mask 对齐、训练集参数复用、标签独立、MAR 驱动可观测和 MNAR 特征相关。校准测试覆盖概率边界、输入校验、拟合/预测分离、映射方向、校准参数记录与可靠性分箱协议一致性。
 
 `set_seed(seed)` 设置 Python random、NumPy、PyTorch 和 CUDA 种子，同时请求确定性 PyTorch 运算。Toy 生成和两次分层划分均显式使用同一种子。Logistic Regression 的中位数填充与标准化只通过训练集 `fit`，测试集仅 `predict_proba`。
 
 同配置、同环境下应得到相同划分与预测。跨硬件、操作系统和数值库不承诺逐位相同。直接依赖已固定，但传递依赖未完全锁定；每次运行记录环境版本。若研究需要精确归档环境，可在本地执行 `python -m pip freeze > results/environment.txt`。Python 的 hash 种子必须在进程启动前设置才生效，如 `PYTHONHASHSEED=42 python experiments/run_baseline.py`；实验不依赖 hash 顺序。
 
-GitHub Actions 在 push 和 Pull Request 上执行 pytest 与 baseline。
+GitHub Actions 在 push 和 Pull Request 上执行 pytest，并重复运行 baseline 与校准对比两次以比较报告是否逐字节一致。
 
 ## 后续实验计划
 
@@ -174,7 +195,7 @@ GitHub Actions 在 push 和 Pull Request 上执行 pytest 与 baseline。
 2. 已实现并验证 MCAR / MAR / MNAR。先划分，再在训练集拟合机制阈值，再向各划分应用缺失，最后填充。统一实验 runner 的集成由成员 3 负责。
 3. 完成 Random Forest、LightGBM、普通 MLP；在相同划分、缺失掩码与预算下比较 baseline。
 4. 实现 Mask-aware MLP，并开展 with / without mask 消融。
-5. 在独立验证集拟合校准；若同时调参和校准，应再划分验证集或使用交叉验证。测试集只用于最终评价。
+5. 已在独立验证子集 validation_calibration 实现 Platt Scaling 与 Isotonic Regression 校准、配对的前后对比和可靠性图；Temperature Scaling 单列 logits adapter，温度拟合仍待实现。
 6. 对三种机制、三个缺失率、多个种子运行配对实验，报告均值与标准差、可靠性图和校准前后对比。
 7. 研究结果确认后再实现简单 Streamlit 输入与预测展示。
 

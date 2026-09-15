@@ -1,0 +1,28 @@
+# Phase 2: freeze the Logistic Regression baseline, fit calibration on the
+# independent validation_calibration rows, then compare variants on one test split.
+seed: 42
+data:
+  name: toy
+  n_samples: 1000
+  n_features: 12
+  n_informative: 6
+split:
+  validation_size: 0.2
+  test_size: 0.2
+  # Relative to validation: moves half of it into a calibration-only child split,
+  # leaving validation_tune untouched for future tuning or early stopping.
+  calibration_fraction: 0.5
+model:
+  name: logistic
+  C: 1.0
+  max_iter: 1000
+calibration:
+  methods: [platt, isotonic]
+  # Probabilities are clipped to [eps, 1 - eps] before the logit transform.
+  clip_epsilon: 1.0e-6
+evaluation:
+  threshold: 0.5
+  n_bins: 10
+output:
+  # Preferred over output.path so a shared config never overwrites its baseline report.
+  calibration_path: results/calibration.json
