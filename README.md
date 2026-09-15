@@ -29,7 +29,7 @@ Toy 指标只用于检查流程，不能作为信用风险研究结论。
 | AUC、F1、Brier Score、ECE | 已实现 |
 | 配置驱动运行与本地 JSON 报告 | 已实现 |
 | pytest 与 GitHub Actions | 已配置 |
-| MCAR / MAR / MNAR | 接口与 TODO，调用会抛出 NotImplementedError |
+| MCAR / MAR / MNAR | 已实现，支持固定 seed、精确缺失率、训练集拟合计划和可复用 mask |
 | LightGBM、MLP、Mask-aware MLP | 接口与 TODO，尚未训练实现 |
 | Random Forest | 后续计划，当前未建立实现 |
 | Platt Scaling / Isotonic Regression 概率校准 | 已实现，只在 validation_calibration 拟合 |
@@ -99,7 +99,7 @@ missing-aware-credit-risk/
 │   ├── baseline.yaml         # 当前可运行配置
 │   ├── german_credit.yaml    # 真实信用数据与共享划分配置
 │   ├── calibration.yaml      # 冻结基础模型后的校准对比配置
-│   └── experiment.yaml       # 后续研究矩阵，仅作计划
+│   └── experiment.yaml       # 研究矩阵与缺失机制参数，统一 runner 仍待集成
 ├── data/
 │   └── README.md             # 公开数据获取与本地数据约定
 ├── scripts/
@@ -107,7 +107,8 @@ missing-aware-credit-risk/
 │   └── inspect_german_credit.py # 五行轻量预览
 ├── docs/
 │   ├── data_protocol.md      # 字段协议及课程报告数据/预处理正文
-│   └── calibration_protocol.md # 校准协议、结果产物及课程报告校准正文
+│   ├── calibration_protocol.md # 校准协议、结果产物及课程报告校准正文
+│   └── missingness_protocol.md # MCAR/MAR/MNAR 定义、复现和报告协议
 ├── src/
 │   ├── __init__.py
 │   ├── data/                 # loader.py / preprocess.py / german_credit.py / prepare.py / missing_generator.py
@@ -179,7 +180,7 @@ python experiments/run_calibration.py --seeds 42 43 44 --output results/calibrat
 python -m pytest
 ```
 
-测试覆盖手算指标、概率边界、mask 约定、三个随机数生成器、固定种子划分与预测、划分互斥、缺失值填充和训练集预处理边界。校准测试覆盖概率边界、输入校验、拟合/预测分离、映射单调性、校准参数记录与可靠性分箱协议一致性；高级缺失模块的测试只验证接口拒绝非法参数及明确告知尚未实现，并未验证 MCAR / MAR / MNAR 算法。
+测试覆盖手算指标、概率边界、mask 约定、三个随机数生成器、固定种子划分与预测、划分互斥、缺失值填充和训练集预处理边界。缺失机制测试进一步覆盖精确缺失率、输入不变、已有缺失保留、NaN/mask 对齐、训练集参数复用、标签独立、MAR 驱动可观测和 MNAR 特征相关。校准测试覆盖概率边界、输入校验、拟合/预测分离、映射方向、校准参数记录与可靠性分箱协议一致性。
 
 `set_seed(seed)` 设置 Python random、NumPy、PyTorch 和 CUDA 种子，同时请求确定性 PyTorch 运算。Toy 生成和两次分层划分均显式使用同一种子。Logistic Regression 的中位数填充与标准化只通过训练集 `fit`，测试集仅 `predict_proba`。
 
@@ -190,7 +191,7 @@ GitHub Actions 在 push 和 Pull Request 上执行 pytest，并重复运行 base
 ## 后续实验计划
 
 1. 已接入 German Credit，并完成目标映射、特征元数据、官方来源校验、固定行索引和训练集类别处理；后续数据集按相同协议扩展。
-2. 定义并验证 MCAR / MAR / MNAR。先划分，再注入缺失，再填充。MAR 驱动特征必须保持可观测，MNAR 可依据注入前的特征值；不得使用测试集统计量拟合机制参数，也不掩盖标签。明确自然缺失与额外注入缺失的比例定义。
+2. 已实现并验证 MCAR / MAR / MNAR。先划分，再在训练集拟合机制阈值，再向各划分应用缺失，最后填充。统一实验 runner 的集成由成员 3 负责。
 3. 完成 Random Forest、LightGBM、普通 MLP；在相同划分、缺失掩码与预算下比较 baseline。
 4. 实现 Mask-aware MLP，并开展 with / without mask 消融。
 5. 已在独立验证子集 validation_calibration 实现 Platt Scaling 与 Isotonic Regression 校准、配对的前后对比和可靠性图；Temperature Scaling 单列 logits adapter，温度拟合仍待实现。
