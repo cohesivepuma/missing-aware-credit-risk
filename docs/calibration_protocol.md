@@ -6,7 +6,7 @@
 
 本研究在基础模型训练完成后冻结其全部参数，再使用与调参、早停和测试完全独立的校准验证子集拟合概率校准器。这样处理的原因是：判别能力与概率可靠性是两个不同目标，判别力较强的模型仍可能给出系统性偏高的正类概率；而如果在测试集上选择校准方法、阈值或分箱数，报告的校准收益就会包含测试集信息，失去最终评价的意义。
 
-本研究实现两种校准方法。Platt Scaling 在概率的对数几率（logit）尺度上拟合一个几乎无正则化的 Logistic 回归，因此得到的映射关于 log-odds 单调，不改变样本的排序；Isotonic Regression 拟合一个单调的分段常数映射，输出被限制在 [0, 1] 区间，能够刻画更一般的单调畸变，但在校准样本较少时更容易过拟合。为避免概率恰好为 0 或 1 时 logit 发散，Platt Scaling 在变换前将概率裁剪到 [ε, 1 − ε]，本实验取 ε = 1e-6，对应 |logit| ≤ 13.9。裁剪只影响极端取值，不改变其余样本的相对次序。
+本研究实现两种校准方法。Platt Scaling 在概率的对数几率（logit）尺度上拟合一个几乎无正则化的 Logistic 回归，得到 `sigmoid(a * logit(p) + b)`；斜率 a 由独立校准子集拟合，可以为正、零或负。Isotonic Regression 使用 sklearn 的单调非减映射，在拟合阈值之间线性插值，平坦区间会产生并列概率；输出被限制在 [0, 1] 区间，但在校准样本较少时更容易过拟合。为避免概率恰好为 0 或 1 时 logit 发散，Platt Scaling 在变换前将概率裁剪到 [ε, 1 − ε]，本实验取 ε = 1e-6，对应 |logit| ≤ 13.9。自定义 ε 必须保证 float64 中 `1−ε < 1`，过小而不能区分上界的参数会被拒绝。裁剪可能使极端概率成为并列值。
 
 校准前后使用完全相同的测试样本、相同的分类阈值（0.5）与相同的分箱数（10），指标定义与全项目一致：AUC 与 F1 越大越好，Brier Score 与 ECE 越小越好。ECE 按等宽概率区间计算，按样本占比加权各区间的平均正类概率与正类频率之差，最后一个区间包含概率 1，空区间贡献为 0；这是正类概率 ECE，报告时必须同时记录分箱数。需要强调的是，本文不把“Brier 与 ECE 在每次实验中均下降”作为验收条件：校准可能改善概率质量而略微降低排序指标，也可能因校准样本有限而退化。我们如实记录每次实验的实际改善或退化。
 
@@ -18,8 +18,8 @@ Temperature Scaling 面向直接输出 logits 的深度模型，需要一个单�
 
 配对结果必须分开读，否则很容易得出错误结论：
 
-- **AUC 不变是预期行为，不是失败。** Platt Scaling 在 log-odds 尺度上严格单调，因此不改变样本排序，AUC 必然与未校准完全一致；若 AUC 变化，说明实现或输入有问题。Isotonic Regression 会引入并列值，AUC 可能略微下降，这是分段常数映射的固有代价。
-- **F1 变化主要反映操作点移动，不反映判别能力。** 校准会重排概率到接近真实正类频率的尺度。在类别不平衡数据上（例如 Good/Bad ≈ 700/300），校准后正类概率整体下移，固定阈值 0.5 会把更多样本判为负类，F1 随之下降。因此报告中若引用 F1，必须在 `validation_tune` 上重新选择阈值，并且只能报告“用验证集选阈值”这一条路径下的结果，不能拿校准前的 F1 与校准后的 F1 直接比较。本变更不改变默认阈值协议，也不在测试集上搜索阈值。
+- **AUC 不变需要条件。** Platt 的斜率 a 为正，且裁剪、浮点舍入或 sigmoid 饱和没有引入新的并列值时，样本排序保持不变，AUC 不变。a 为负会反转排序，a 为零会输出常数；即使 a 为正，裁剪产生的新并列值也可能改变 AUC。因此 AUC 变化本身不等于实现错误，应结合拟合斜率和并列概率解释。Isotonic 的平坦区间也会产生并列值，AUC 可以升高或降低。
+- **F1 需要结合阈值解释。** 可以在同一个预先设定的阈值（本流程为 0.5）下配对报告校准前后的 F1，说明校准改变了哪些分类决策；概率可能上移或下移，F1 的方向并不固定。若要报告优化阈值后的 F1，应对每个变体仅在 `validation_tune` 上选择阈值，再固定阈值用于测试。不要把固定阈值与优化阈值两种协议混为一谈，也不要在测试集上搜索阈值。本流程当前只报告固定阈值结果。
 - **校准样本有限时，Brier 与 ECE 可能退化。** 校准器只有 `validation_calibration` 的样本可用于拟合；当该子集较小、而基础模型本身已接近校准时，加入校准反而会引入估计噪声。这是需要如实报告的结果，不是需要掩盖的失败。
 - 因此结论应表述为“在给定划分、给定校准样本量与给定阈值协议下，校准改善/退化/无明显影响”，而不是泛化的“校准更好”。
 
@@ -43,7 +43,7 @@ calibrated = calibrator.predict_proba(test_probabilities)     # 一维 P(y=1)，
 - `fit(probabilities, y)` 要求一维、等长、概率在 [0, 1]、标签为 0/1，且两个类别都存在。
 - `predict_proba(probabilities)` 必须在 `fit` 之后调用，否则抛出 `RuntimeError`；返回值为 `float64` 一维数组，且始终位于 [0, 1]。
 - `is_fitted` 与 `fitted_parameters` 用于报告与调试；`fitted_parameters` 在未拟合时同样抛出 `RuntimeError`。
-- 两种方法都是关于输入概率单调非减的映射，因此不会反转样本排序；Platt 在 log-odds 尺度上严格单调。
+- Isotonic 关于输入概率单调非减；Platt 的单调方向由拟合斜率 a 决定，输出裁剪与数值舍入可能产生并列概率。
 
 `LogitsAdapter` 固定 logits 契约：一维 logits、与 `P(y=1)` 相同的行顺序、稳定 sigmoid、裁剪后的 logit 变换，以及给定温度下的 `sigmoid(logits / T)`。`LogitsAdapter.fit_temperature` 目前显式抛出 `NotImplementedError`，表示温度拟合属于后续扩展，而不是已实现的方法。
 
@@ -54,6 +54,7 @@ calibrated = calibrator.predict_proba(test_probabilities)     # 一维 P(y=1)，
 - 正向判定固定为 `P(y=1) >= threshold`，默认 0.5；阈值选择属于验证集工作，本模块不提供测试集阈值搜索。
 - 分箱定义统一由 `assign_probability_bins` 提供：等宽区间，除最后一箱外均为左闭右开，最后一箱额外包含概率 1。ECE 与可靠性图调用同一个函数，因此图中的分箱与报告中的 ECE 一定对应同一协议。
 - 校准前后必须使用同一批测试样本，禁止为了凑出更好看的结果更换评价子集。
+- 绘图函数会拒绝各曲线标签长度或标签顺序不一致的输入；样本身份的一致性由实验 runner 复用同一个 test 划分保证。
 
 ## 结果产物
 
@@ -91,7 +92,7 @@ python experiments/run_calibration.py --seeds 42 43 44 \
 
 多种子模式下，换种子会改变划分，因此 `split.manifest_path` 必须写作包含 `{seed}` 的模板（例如 `data/processed/german_credit/splits_seed{seed}.json`），否则脚本会明确拒绝运行，避免复用与当前种子不匹配的共享行索引。
 
-输出路径优先取 `output.calibration_path`，没有该键时回退到 `output.path`。因此复用 `configs/german_credit.yaml` 时必须显式传入 `--output`，否则会覆盖该配置的 baseline 报告。`calibration.methods` 中的 `none` 表示“不校准”这一对照，每次运行都会自动包含 `uncalibrated`，因此 `none` 不需要也不应该重复列出。
+输出路径优先取显式 `--output`，其次取 `output.calibration_path`。如果配置只有 baseline 使用的 `output.path`，脚本会在文件名后缀前添加 `_calibration`，例如 `results/german_credit_baseline.json` 对应 `results/german_credit_baseline_calibration.json`，保留原 baseline 报告。可靠性图默认保存在校准报告所在目录。`calibration.methods` 中的 `none` 表示“不校准”这一对照，每次运行都会自动包含 `uncalibrated`，因此 `none` 无需重复列出；至少需要一个实际校准方法。
 
 ## 实验影响说明
 
@@ -101,7 +102,7 @@ python experiments/run_calibration.py --seeds 42 43 44 \
 
 ## 对接约定
 
-- **成员 3（集成负责人）**：`experiments/run_calibration.py` 的输出结构与 `run_baseline.py` 保持一致（配置、指纹、划分大小、指标、环境版本），四种变体在同一批测试样本上配对比较；接入统一实验流程时请复用 `runs[].metrics` 字典，不要重新定义指标名。
+- **成员 3（集成负责人）**：`experiments/run_calibration.py` 的报告包含配置、数据指纹、划分大小、指标和环境版本；三种变体在同一批测试样本上配对比较。接入统一实验流程时请复用 `runs[].metrics` 字典，不要重新定义指标名。
 - **成员 4（深度模型）**：Mask-aware MLP 只需按现有外部接口提供 `(n_samples, 2)` 概率，校准器即可直接作用于第 1 列 `P(y=1)`。若模型暴露 logits，请使用 `LogitsAdapter` 的契约；在本次变更中不要依赖未实现的温度拟合。有/无校准的消融入口由 `calibration.methods` 控制，不额外增加参数。
 - **成员 5**：负责校准器、可靠性图与本节报告正文；不根据测试结果选择校准方法、阈值或分箱数。多种子汇总需要其他模型负责人提供各自的 `results/` 报告后合并。
 

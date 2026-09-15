@@ -91,7 +91,7 @@ def test_reject_unsupported_method() -> None:
         ProbabilityCalibrator("temperature")
 
 
-@pytest.mark.parametrize("clip_epsilon", [0.0, -1e-6, 0.5, 1.0, np.nan, np.inf, True, "1e-6"])
+@pytest.mark.parametrize("clip_epsilon", [0.0, -1e-6, 1e-20, 0.5, 1.0, np.nan, np.inf, True, "1e-6"])
 def test_reject_invalid_clip_epsilon(clip_epsilon: object) -> None:
     with pytest.raises(ValueError, match="clip_epsilon"):
         ProbabilityCalibrator("platt", clip_epsilon=clip_epsilon)  # type: ignore[arg-type]
@@ -140,6 +140,37 @@ def test_logits_adapter_round_trips_interior_probabilities() -> None:
     assert adapter.to_probabilities(adapter.to_logits(probabilities)) == pytest.approx(
         probabilities
     )
+
+
+def test_platt_can_reverse_an_anticorrelated_score() -> None:
+    scores = np.array([0.1, 0.2, 0.8, 0.9])
+    labels = np.array([1, 1, 0, 0])
+    calibrator = ProbabilityCalibrator("platt").fit(scores, labels)
+    calibrated = calibrator.predict_proba(scores)
+
+    assert calibrator.fitted_parameters["a"] < 0
+    assert np.all(np.diff(calibrated) < 0)
+    assert evaluate_metrics(labels, calibrated)["auc"] == 1.0
+
+
+def test_platt_clipping_can_change_auc_even_with_positive_slope() -> None:
+    fit_scores = np.array([0.1, 0.2, 0.8, 0.9])
+    calibrator = ProbabilityCalibrator("platt").fit(fit_scores, np.array([0, 0, 1, 1]))
+    scores = np.array([1e-9, 2e-9, 0.1, 0.9])
+    labels = np.array([0, 1, 0, 1])
+    calibrated = calibrator.predict_proba(scores)
+
+    assert calibrator.fitted_parameters["a"] > 0
+    assert calibrated[0] == calibrated[1]
+    assert evaluate_metrics(labels, scores)["auc"] == 0.75
+    assert evaluate_metrics(labels, calibrated)["auc"] == 0.625
+
+
+def test_isotonic_interpolates_between_fitted_thresholds() -> None:
+    calibrator = ProbabilityCalibrator("isotonic").fit(
+        np.array([0.2, 0.8]), np.array([0, 1])
+    )
+    assert calibrator.predict_proba(np.array([0.5])) == pytest.approx([0.5])
 
 
 @pytest.mark.parametrize("logits", [[np.nan, 0.0], [np.inf], [], [[0.0, 1.0]]])

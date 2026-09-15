@@ -66,10 +66,13 @@ def plot_reliability_diagram(
     panel shows each curve against the ideal diagonal, the lower panel shows the
     sample count of every bin, and the legend repeats the ECE of each curve.
     """
-    from matplotlib import pyplot as plt
-
     if not curves:
         raise ValueError("curves must contain at least one (y_true, probabilities) pair.")
+    reference_y = next(iter(curves.values()))[0]
+    if any(not np.array_equal(y, reference_y) for y, _ in curves.values()):
+        raise ValueError(
+            "All reliability curves must use the same evaluation labels in the same row order."
+        )
 
     labels = list(curves)
     statistics = {
@@ -79,6 +82,8 @@ def plot_reliability_diagram(
         label: expected_calibration_error(*curves[label], n_bins=n_bins) for label in labels
     }
     drawn = int(len(next(iter(curves.values()))[0]))
+
+    from matplotlib import pyplot as plt
 
     figure, (curve_axis, count_axis) = plt.subplots(
         2,

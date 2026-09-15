@@ -128,6 +128,7 @@ missing-aware-credit-risk/
 └── tests/
     ├── test_data.py          # 标签、来源校验、共享划分和类别拟合边界
     ├── test_calibration.py   # 校准边界、输入校验与拟合/预测分离
+    ├── test_calibration_runner.py # 校准数据隔离、模型冻结与报告保护
     ├── test_reliability.py   # 分箱协议一致性与可靠性图输出
     ├── test_missing_generator.py
     └── test_metrics.py

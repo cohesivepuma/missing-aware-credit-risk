@@ -81,6 +81,25 @@ def test_reject_invalid_bin_counts(n_bins: int) -> None:
         reliability_bins(np.array([0, 1]), np.array([0.2, 0.8]), n_bins=n_bins)
 
 
+@pytest.mark.filterwarnings("ignore::pyparsing.PyparsingDeprecationWarning")
+@pytest.mark.parametrize("other_labels", [[0, 1], [1, 0, 0]])
+def test_plot_rejects_unpaired_evaluation_labels(
+    tmp_path: Path, other_labels: list[int]
+) -> None:
+    y = np.array([0, 1, 0])
+    other_y = np.array(other_labels)
+    path = tmp_path / "unpaired.png"
+    with pytest.raises(ValueError, match="same evaluation.*row order"):
+        plot_reliability_diagram(
+            {
+                "uncalibrated": (y, np.array([0.1, 0.9, 0.2])),
+                "platt": (other_y, np.full(len(other_y), 0.5)),
+            },
+            path=path,
+        )
+    assert not path.exists()
+
+
 @pytest.mark.parametrize(
     ("y", "p"), [([0, 1], [0.2]), ([0, 2], [0.2, 0.8]), ([0, 1], [0.2, 1.5])]
 )

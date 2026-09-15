@@ -13,10 +13,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import matplotlib
-
-matplotlib.use("Agg")  # Batch script: always render to files, never open a window.
-
 import numpy as np
 import yaml
 
@@ -58,7 +54,10 @@ def _configured_output(config: dict[str, Any]) -> str | Path:
     if "calibration_path" in output:
         return output["calibration_path"]
     if "path" in output:
-        return output["path"]
+        baseline_path = Path(output["path"])
+        return baseline_path.with_name(
+            f"{baseline_path.stem}_calibration{baseline_path.suffix}"
+        )
     raise ValueError("Config output needs 'calibration_path' or 'path'.")
 
 
@@ -218,6 +217,10 @@ def main() -> None:
 
     output = _resolve(args.output or _configured_output(config))
     diagram_dir = None if args.no_diagram else _resolve(args.diagram_dir or output.parent)
+    if diagram_dir is not None:
+        import matplotlib
+
+        matplotlib.use("Agg")  # Batch CLI renders to files without opening a window.
 
     runs = []
     for seed in seeds:

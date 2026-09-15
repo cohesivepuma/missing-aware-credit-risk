@@ -30,8 +30,11 @@ def _require_clip_epsilon(clip_epsilon: float) -> float:
     if isinstance(clip_epsilon, bool) or not isinstance(clip_epsilon, (int, float)):
         raise ValueError("clip_epsilon must be a number in (0, 0.5).")
     value = float(clip_epsilon)
-    if not np.isfinite(value) or not 0.0 < value < 0.5:
-        raise ValueError("clip_epsilon must be in (0, 0.5).")
+    if not np.isfinite(value) or not 0.0 < value < 0.5 or 1.0 - value == 1.0:
+        raise ValueError(
+            "clip_epsilon must be in (0, 0.5) and large enough that "
+            "1 - clip_epsilon is below 1 in float64."
+        )
     return value
 
 
@@ -93,10 +96,11 @@ class ProbabilityCalibrator:
     """Map 1D P(y=1) to calibrated 1D P(y=1), fitted on validation rows only.
 
     Platt scaling fits an effectively unregularized logistic regression on the
-    clipped logit of the base probabilities, so the map stays monotone in
-    log-odds. Isotonic regression fits a monotone piecewise-constant map bounded
-    to [0, 1]. Both preserve the input row order and none of them may be fitted
-    or selected on the test set.
+    clipped logit of the base probabilities. Its slope may be positive, zero or
+    negative; clipping and numerical saturation can introduce ties. Isotonic
+    regression fits a nondecreasing map with linear interpolation between
+    fitted thresholds, bounded to [0, 1]. Both preserve the input row order and
+    neither may be fitted or selected on the test set.
     """
 
     def __init__(
