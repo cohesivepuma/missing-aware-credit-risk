@@ -1,9 +1,18 @@
-# Research roadmap only. The advanced runners are not implemented in phase 1.
+# Research roadmap. Missingness generation is implemented; the integrated
+# mechanisms x rates x models runner is still owned by the experiment task.
 seeds: [42, 43, 44]
 missingness:
   mechanisms: [mcar, mar, mnar]
   rates: [0.1, 0.3, 0.5]
   mask_convention: "1 = observed, 0 = missing"
+  rate_denominator: observed_eligible_cells
+  selection: exact_without_replacement
+  fit_parameters_on: train
+  eligible_features: null
+  mar_driver_features: [1]  # German Credit duration; removed from injectable columns.
+  mnar_features: [1, 4, 7, 10, 12, 15, 17]  # Numeric/ordinal fields only.
+  direction: higher
+  strength: 1.0
 models: [logistic, random_forest, lightgbm, mlp, mask_aware_mlp]
 calibration:
   methods: [none, platt, isotonic, temperature]

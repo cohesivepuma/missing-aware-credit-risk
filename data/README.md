@@ -95,7 +95,7 @@ manifest_path 相对于仓库根目录；存在时复用索引并验证数据指
 
 **共享协议：先划分 → 对原始 20 个字段注入缺失 → 在训练集拟合填充/编码/缩放 → 训练与校准 → 测试。** 缺失生成器操作编码前的字段列，每个字段对应一个 mask 位；不独立掩盖 one-hot 的不同列，不掩盖 y 或行索引。机制拟合参数只能来自 train，同一比较共享掩码。后续深度模型可内部编码 x，再拼接原始 20 维 mask。
 
-字段表和可用于课程报告的数据/预处理正文见 [docs/data_protocol.md](../docs/data_protocol.md)。缺失生成、神经网络和校准实现仍由各模块 Issue 完成。
+字段表和可用于课程报告的数据/预处理正文见 [docs/data_protocol.md](../docs/data_protocol.md)。缺失生成接口、精确率控制和训练集参数复用见 [docs/missingness_protocol.md](../docs/missingness_protocol.md)；统一实验 runner、神经网络和校准实现仍由对应模块 Issue 完成。
 
 ## 其他数据入口
 
