@@ -1,5 +1,6 @@
 """Logistic Regression baseline with train-only imputation and scaling."""
 
+from collections.abc import Sequence
 from typing import Self
 
 import numpy as np
@@ -14,10 +15,11 @@ from src.models.base import BaseModel
 class LogisticRegressionModel(BaseModel):
     """Ignore mask intentionally; this is the feature-value-only baseline."""
 
-    def __init__(self, *, seed: int = 42, C: float = 1.0, max_iter: int = 1000) -> None:
+    def __init__(self, *, seed: int = 42, C: float = 1.0, max_iter: int = 1000,
+                 categorical_features: Sequence[int] | None = None) -> None:
         self.pipeline = Pipeline(
             [
-                ("preprocess", build_preprocessor()),
+                ("preprocess", build_preprocessor(categorical_features)),
                 (
                     "classifier",
                     LogisticRegression(C=C, max_iter=max_iter, random_state=seed, solver="lbfgs"),

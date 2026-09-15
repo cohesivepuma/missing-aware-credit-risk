@@ -1,7 +1,6 @@
 """Run the offline reproducible Logistic Regression baseline from a YAML file."""
 
 import argparse
-import hashlib
 import importlib.metadata
 import json
 import platform
@@ -16,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import yaml
 
-from src.data.loader import load_dataset
+from src.data.loader import dataset_fingerprint, load_dataset
 from src.data.preprocess import split_dataset
 from src.metrics.metrics import evaluate_metrics
 from src.models.logistic import LogisticRegressionModel
@@ -41,14 +40,9 @@ def run_baseline(config: dict[str, Any]) -> dict[str, Any]:
     probabilities = model.predict_proba(test["x"], mask=test["mask"])[:, 1]
     metrics = evaluate_metrics(test["y"], probabilities, **config["evaluation"])
 
-    # Fingerprint the in-memory numeric data, including labels and original mask.
-    fingerprint = hashlib.sha256()
-    for key in ("x", "mask", "y"):
-        fingerprint.update(str(data[key].shape).encode())
-        fingerprint.update(data[key].tobytes())
     return {
         "config": config,
-        "dataset_sha256": fingerprint.hexdigest(),
+        "dataset_sha256": dataset_fingerprint(data),
         "split_sizes": {name: len(part["y"]) for name, part in splits.items()},
         "evaluation_split": "test",
         "metrics": metrics,
