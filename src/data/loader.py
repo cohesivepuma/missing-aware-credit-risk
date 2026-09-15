@@ -1,5 +1,7 @@
 """Load offline toy data or a user-supplied numeric credit dataset."""
 
+import hashlib
+import json
 from pathlib import Path
 from typing import TypedDict
 
@@ -30,7 +32,8 @@ def load_dataset(
     """Return {x, mask, y}. CSV targets must already use 1=default, 0=non-default.
 
     Toy data is synthetic and only verifies the pipeline, not credit performance.
-    CSV features must be numeric; categorical encoding is a future dataset task.
+    Generic CSV features must be numeric. German Credit categorical values are
+    fixed transport codes; fit their one-hot encoder on training data only.
     """
     if name == "toy":
         x, y = make_classification(
@@ -40,6 +43,21 @@ def load_dataset(
             n_redundant=0,
             random_state=seed,
         )
+    elif name == "german_credit":
+        from src.data.german_credit import EXPECTED_ROWS, FEATURES, RAW_SHA256, TARGET_COLUMN
+
+        csv_path = Path(path) if path is not None else Path(__file__).resolve().parents[2] / "data/processed/german_credit/german_credit.csv"
+        if not csv_path.exists():
+            raise FileNotFoundError("Run python scripts/prepare_german_credit.py before loading German Credit.")
+        metadata = json.loads(csv_path.with_name("metadata.json").read_text(encoding="utf-8"))
+        checksum = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+        if metadata.get("schema_version") != 1 or metadata.get("raw_sha256") != RAW_SHA256 or metadata.get("processed_sha256") != checksum:
+            raise ValueError("German Credit metadata or processed checksum does not match.")
+        frame = pd.read_csv(csv_path)
+        if list(frame.columns) != [feature.name for feature in FEATURES] + [TARGET_COLUMN] or len(frame) != EXPECTED_ROWS:
+            raise ValueError("German Credit processed file has an unexpected schema or row count.")
+        x = frame.drop(columns=[TARGET_COLUMN]).to_numpy(dtype=np.float64)
+        y = frame[TARGET_COLUMN].to_numpy()
     elif name == "csv":
         if path is None or target_column is None:
             raise ValueError("CSV loading requires path and target_column.")
@@ -52,7 +70,7 @@ def load_dataset(
             raise ValueError("CSV features must be numeric; encode categories first.")
         x = features.to_numpy(dtype=np.float64)
     else:
-        raise ValueError(f"Unsupported dataset: {name!r}. Choose 'toy' or 'csv'.")
+        raise ValueError(f"Unsupported dataset: {name!r}. Choose 'toy', 'csv' or 'german_credit'.")
 
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y)
@@ -67,3 +85,12 @@ def load_dataset(
         "mask": (~np.isnan(x)).astype(np.uint8),  # 1=observed, 0=missing
         "y": y.astype(np.int64),
     }
+
+
+def dataset_fingerprint(data: Dataset) -> str:
+    """Hash aligned numeric values, original masks and labels for split reuse."""
+    digest = hashlib.sha256()
+    for key in ("x", "mask", "y"):
+        digest.update(str(data[key].shape).encode())
+        digest.update(data[key].tobytes())
+    return digest.hexdigest()
