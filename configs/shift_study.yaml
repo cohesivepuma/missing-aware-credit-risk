@@ -1,0 +1,40 @@
+# Frozen before v2 performance evaluation; see docs/shift_protocol.md.
+version: 2
+seed: 2026
+outer_folds: 5
+inner_folds: 4
+datasets:
+  german_credit: {targets: [4, 7, 10, 12, 15, 17], drivers: [1]}
+  credit_approval: {targets: [1, 7, 10, 14], drivers: [2]}
+  taiwan_default: {targets: [0, 11, 12, 17, 18, 19], drivers: [4]}
+source: {mechanism: mcar, rate: 0.3, strength: 1.0}
+targets:
+  - {mechanism: natural, rate: 0.0, strength: 0.0}
+  - {mechanism: mcar, rate: 0.1, strength: 1.0}
+  - {mechanism: mcar, rate: 0.3, strength: 1.0}
+  - {mechanism: mcar, rate: 0.5, strength: 1.0}
+  - {mechanism: mar, rate: 0.1, strength: 1.0}
+  - {mechanism: mar, rate: 0.3, strength: 1.0}
+  - {mechanism: mar, rate: 0.5, strength: 1.0}
+  - {mechanism: mnar, rate: 0.1, strength: 1.0}
+  - {mechanism: mnar, rate: 0.3, strength: 1.0}
+  - {mechanism: mnar, rate: 0.5, strength: 1.0}
+  - {mechanism: mnar, rate: 0.1, strength: 4.0}
+  - {mechanism: mnar, rate: 0.3, strength: 4.0}
+  - {mechanism: mnar, rate: 0.5, strength: 4.0}
+models: [logistic, logistic_mask, random_forest, random_forest_mask, mlp, mask_aware_mlp, lightgbm]
+model_parameters:
+  logistic: {C: 1.0, max_iter: 1000}
+  logistic_mask: {C: 1.0, max_iter: 1000}
+  random_forest: {n_estimators: 150, min_samples_leaf: 3, max_features: 1.0}
+  random_forest_mask: {n_estimators: 150, min_samples_leaf: 3, max_features: 1.0}
+  mlp: &mlp {hidden_sizes: [32, 16], epochs: 60, batch_size: 64, learning_rate: 0.001, weight_decay: 0.001}
+  mask_aware_mlp: *mlp
+  lightgbm: {n_estimators: 150, learning_rate: 0.05, num_leaves: 15, min_child_samples: 20, reg_lambda: 1.0}
+calibration:
+  budgets: [25, 50, 100]
+  methods: [platt, isotonic]
+  modes: [source, target]
+evaluation: {threshold: 0.5, n_bins: 10, log_loss_clip: 0.000001}
+uncertainty: {seed: 2027, bootstrap_samples: 2000, level: 0.95}
+primary: {condition: mnar_r0.5_s4, variant: source_platt_n100, metric: brier}

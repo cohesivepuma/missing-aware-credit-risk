@@ -1,0 +1,31 @@
+# Prespecified empirical-study protocol. No hyperparameter selection on test data.
+seeds: [42, 43, 44, 45, 46, 47, 48, 49, 50, 51]
+data:
+  name: german_credit
+  path: data/processed/german_credit/german_credit.csv
+split:
+  validation_size: 0.2
+  test_size: 0.2
+  calibration_fraction: 0.5
+  manifest_path: data/processed/german_credit/splits_seed{seed}.json
+missingness:
+  mechanisms: [mcar, mar, mnar]
+  rates: [0.1, 0.3, 0.5]
+  # Same six numerical/ordered targets in every mechanism; duration is observed.
+  target_features: [4, 7, 10, 12, 15, 17]
+  mar_driver_features: [1]
+  direction: higher
+  strength: 1.0
+models: [logistic, random_forest, mlp, mask_aware_mlp]
+model_parameters:
+  logistic: {C: 1.0, max_iter: 1000}
+  random_forest: {n_estimators: 150, min_samples_leaf: 3}
+  mlp: &mlp {hidden_sizes: [32, 16], epochs: 60, batch_size: 64, learning_rate: 0.001, weight_decay: 0.001}
+  mask_aware_mlp: *mlp
+calibration:
+  methods: [platt, isotonic]
+evaluation:
+  threshold: 0.5
+  n_bins: 10
+output:
+  path: results/benchmark.json

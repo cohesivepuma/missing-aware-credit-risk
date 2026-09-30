@@ -1,0 +1,21 @@
+# Phase 1: complete synthetic data, Logistic Regression, no calibration.
+seed: 42
+data:
+  name: toy
+  n_samples: 1000
+  n_features: 12
+  n_informative: 6
+  # For a local numeric CSV: name: csv, path: data/raw/credit.csv,
+  # target_column: default. Encode default as 1, non-default as 0.
+split:
+  validation_size: 0.2
+  test_size: 0.2
+model:
+  name: logistic
+  C: 1.0
+  max_iter: 1000
+evaluation:
+  threshold: 0.5
+  n_bins: 10
+output:
+  path: results/baseline.json

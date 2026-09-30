@@ -1,0 +1,21 @@
+# Prepare data first: python scripts/prepare_german_credit.py
+seed: 42
+data:
+  name: german_credit
+  path: data/processed/german_credit/german_credit.csv
+split:
+  validation_size: 0.2
+  test_size: 0.2
+  calibration_fraction: 0.5
+  manifest_path: data/processed/german_credit/splits_seed42.json
+model:
+  name: logistic
+  C: 1.0
+  max_iter: 1000
+  # Zero-based original fields; official transport codes are not ordinal values.
+  categorical_features: [0, 2, 3, 5, 6, 8, 9, 11, 13, 14, 16, 18, 19]
+evaluation:
+  threshold: 0.5
+  n_bins: 10
+output:
+  path: results/german_credit_baseline.json

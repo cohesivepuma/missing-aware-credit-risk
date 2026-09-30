@@ -1,0 +1,6 @@
+# Additional dependencies for the demo/workbench API; research requirements unchanged.
+-r requirements.txt
+fastapi==0.141.1
+uvicorn==0.54.0
+python-multipart==0.0.32
+httpx==0.28.1
